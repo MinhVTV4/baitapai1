@@ -242,28 +242,30 @@
             max-width: 80%;
             line-height: 1.6;
             font-family: 'Be Vietnam Pro', sans-serif;
+            width: fit-content;
         }
         .bubble-ai {
             background-color: #e5e7eb;
             color: #1f2937;
             border-bottom-left-radius: 0.25rem;
+            align-self: flex-start;
         }
         .bubble-user {
             background-color: #4f46e5;
             color: white;
             border-bottom-right-radius: 0.25rem;
+            align-self: flex-end;
         }
         .prose-feedback del {
             background-color: #fee2e2;
-            text-decoration: line-through;
-            text-decoration-color: #ef4444;
-            padding: 2px;
+            text-decoration: none;
+            padding: 1px 2px;
             border-radius: 3px;
         }
         .prose-feedback ins {
             background-color: #dcfce7;
             text-decoration: none;
-            padding: 2px;
+            padding: 1px 2px;
             border-radius: 3px;
         }
     </style>
@@ -417,8 +419,16 @@
             <textarea id="writing-input" class="w-full p-4 border-none focus:outline-none bg-transparent" rows="15" placeholder="Viết bài của bạn ở đây..."></textarea>
             <div id="writing-footer" class="test-paper-footer">
                 <div class="text-right my-4 font-semibold text-gray-600" id="word-count">0 từ</div>
-                <button id="get-feedback-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg w-full">Nhận phản hồi từ AI</button>
+                <button id="get-feedback-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg w-full flex items-center justify-center">
+                    <span class="btn-text">Nhận phản hồi từ AI</span>
+                    <svg class="spinner h-5 w-5 text-white hidden ml-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                </button>
                 <div id="writing-feedback-container" class="mt-8 space-y-4 prose-feedback" style="line-height: 1.6;"></div>
+                <!-- NEW: Action buttons for after feedback -->
+                <div id="writing-actions-container" class="hidden mt-4 flex justify-center gap-4">
+                    <button id="restart-writing-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-lg transition-all"><i data-lucide="rotate-cw" class="w-5 h-5 mr-2 inline-block"></i>Làm lại</button>
+                    <button id="change-settings-from-writing-btn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-3 px-6 rounded-lg transition-all"><i data-lucide="sliders-horizontal" class="w-5 h-5 mr-2 inline-block"></i>Đổi cài đặt</button>
+                </div>
             </div>
         </div>
 
@@ -427,7 +437,7 @@
             <div class="test-paper-header">
                 <h2 id="conversation-topic" class="text-2xl font-bold text-center mb-4">Hội thoại thực hành</h2>
             </div>
-            <div id="conversation-log" class="h-96 overflow-y-auto p-4 bg-gray-100 rounded-lg mb-4 space-y-4">
+            <div id="conversation-log" class="h-96 overflow-y-auto p-4 bg-gray-100 rounded-lg mb-4 flex flex-col gap-4" style="line-height: 1.5;">
                 <!-- Messages will be appended here -->
             </div>
             <div id="conversation-footer" class="test-paper-footer">
@@ -541,7 +551,6 @@
         const exerciseView = document.getElementById('exercise-view');
         const summaryView = document.getElementById('summary-view');
         const historyView = document.getElementById('history-view');
-        // NEW View Elements
         const writingView = document.getElementById('writing-view');
         const conversationView = document.getElementById('conversation-view');
         
@@ -609,6 +618,24 @@
         const paperDetails = document.getElementById('paper-details');
         const paperScore = document.getElementById('paper-score');
         
+        // Writing View Elements
+        const writingTopic = document.getElementById('writing-topic');
+        const writingInput = document.getElementById('writing-input');
+        const wordCount = document.getElementById('word-count');
+        const getFeedbackBtn = document.getElementById('get-feedback-btn');
+        const writingFeedbackContainer = document.getElementById('writing-feedback-container');
+        const writingActionsContainer = document.getElementById('writing-actions-container');
+        const restartWritingBtn = document.getElementById('restart-writing-btn');
+        const changeSettingsFromWritingBtn = document.getElementById('change-settings-from-writing-btn');
+
+        // Conversation View Elements
+        const conversationTopic = document.getElementById('conversation-topic');
+        const conversationLog = document.getElementById('conversation-log');
+        const conversationInputArea = document.getElementById('conversation-input-area');
+        const conversationTextInput = document.getElementById('conversation-text-input');
+        const sendTextBtn = document.getElementById('send-text-btn');
+        const endConversationBtn = document.getElementById('end-conversation-btn');
+
         // Summary View Elements
         const summaryText = document.getElementById('summary-text');
         const summaryProgressBar = document.getElementById('summary-progress-bar');
@@ -619,13 +646,16 @@
 
         // --- State ---
         let allQuestions = [];
-        let currentQuizData = {}; // NEW: A more general state object
+        let currentQuizData = {}; 
         let currentQuestionIndex = 0;
         let score = 0;
         let generatedExercisesCache = [];
         let currentUser = null;
         let currentTestResult = {};
         let sessionResults = [];
+        let conversationHistory = [];
+        const synth = window.speechSynthesis;
+        let audioState = { utterance: null, isPaused: false };
 
         // --- Utility Functions ---
         function sanitizeString(str) {
@@ -645,12 +675,27 @@
         // --- AI TOOLBOX ---
         const tools = [{ functionDeclarations: [ { name: 'createMultipleChoiceQuestion', description: 'Tạo một câu hỏi trắc nghiệm.', parameters: { type: 'OBJECT', properties: { question: { type: 'STRING' }, options: { type: 'ARRAY', items: { type: 'STRING' } }, correctAnswerIndex: { type: 'NUMBER' }, explanation: { type: 'STRING', description: 'Giải thích ngắn gọn tại sao đáp án lại đúng.' } }, required: ['question', 'options', 'correctAnswerIndex', 'explanation'] } }, { name: 'createFillInTheBlankQuestion', description: 'Tạo một câu hỏi điền vào chỗ trống.', parameters: { type: 'OBJECT', properties: { question: { type: 'STRING' }, correctAnswer: { type: 'STRING' }, explanation: { type: 'STRING', description: 'Giải thích ngắn gọn tại sao đáp án lại đúng.' } }, required: ['question', 'correctAnswer', 'explanation'] } }, { name: 'createTrueFalseQuestion', description: 'Tạo một câu hỏi dạng Đúng hoặc Sai.', parameters: { type: 'OBJECT', properties: { statement: { type: 'STRING' }, isCorrect: { type: 'BOOLEAN' }, explanation: { type: 'STRING', description: 'Giải thích ngắn gọn tại sao đáp án lại đúng.' } }, required: ['statement', 'isCorrect', 'explanation'] } }, { name: 'createMatchingQuestion', description: 'Tạo một bài tập nối cột.', parameters: { type: 'OBJECT', properties: { title: { type: 'STRING' }, columnA: { type: 'ARRAY', items: { type: 'STRING' } }, columnB: { type: 'ARRAY', items: { type: 'STRING' } } }, required: ['title', 'columnA', 'columnB'] } }, { name: 'createSortingQuestion', description: 'Tạo một bài tập sắp xếp các mục theo đúng thứ tự.', parameters: { type: 'OBJECT', properties: { title: { type: 'STRING' }, items: { type: 'ARRAY', items: { type: 'STRING' }, description: 'Mảng các mục đã ở đúng thứ tự.' } }, required: ['title', 'items'] } }, { name: 'createShortAnswerQuestion', description: 'Tạo một câu hỏi tự luận ngắn.', parameters: { type: 'OBJECT', properties: { question: { type: 'STRING' }, suggestedAnswer: { type: 'STRING' } }, required: ['question', 'suggestedAnswer'] } }, { name: 'createEnglishReadingComprehensionExercise', description: 'Tạo một bài tập đọc hiểu Tiếng Anh hoàn chỉnh.', parameters: { type: 'OBJECT', properties: { passage: { type: 'STRING' }, questions: { type: 'ARRAY', items: { type: 'OBJECT', properties: { questionType: { type: 'STRING', enum: ['mcq', 'short_answer'] }, questionText: { type: 'STRING' }, options: { type: 'ARRAY', items: { type: 'STRING' } }, correctAnswer: { type: 'STRING' }, explanation: { type: 'STRING', description: 'Giải thích ngắn gọn tại sao đáp án lại đúng.' } }, required: ['questionType', 'questionText', 'correctAnswer'] } } }, required: ['passage', 'questions'] } } ] }];
         
-        // --- PROMPTS (from engexam.js and original aibaitap2) ---
-        function getListeningPrompt(level, topic, count) { 
-            return `You are an expert English teacher. Create a listening comprehension quiz. 1. Generate one short monologue or dialogue (50-80 words). The topic is "${topic}" and for a ${level} CEFR level learner. 2. Based on the script, generate ${count} multiple-choice questions. 3. For each question, provide one correct answer, three plausible distractors, and a brief, helpful explanation IN VIETNAMESE. The "answer" field MUST be the full text of the correct option. You MUST wrap your entire response in a 'json' markdown code block. The structure MUST be a valid JSON object: \`\`\`json\n{ "script": "...", "questions": [ { "question": "...", "options": ["..."], "answer": "...", "explanation": "..." } ] }\n\`\`\``; 
+        // --- PROMPTS ---
+        function getListeningPrompt(level, topic, count, length) { 
+            const lengthMap = { short: '50-80 words', medium: '90-120 words', long: '130-160 words' };
+            return `You are an expert English teacher. Create a listening comprehension quiz. 1. Generate one monologue or dialogue of about ${lengthMap[length]}. The topic is "${topic}" and for a ${level} CEFR level learner. 2. Based on the script, generate ${count} multiple-choice questions. 3. For each question, provide one correct answer, three plausible distractors, and a brief, helpful explanation IN VIETNAMESE. The "answer" field MUST be the full text of the correct option. You MUST wrap your entire response in a 'json' markdown code block. The structure MUST be a valid JSON object: \`\`\`json\n{ "script": "...", "questions": [ { "question": "...", "options": ["..."], "answer": "...", "explanation": "..." } ] }\n\`\`\``; 
+        }
+        function getWritingTopicPrompt(level, topic) { 
+            return `You are an English teacher. Generate a single, engaging writing topic for an English learner at the ${level} CEFR level. The topic should be related to "${topic}". The topic should be a question or a statement to respond to. Provide only the topic text, without any extra labels or quotation marks. Example: "Describe your favorite kind of technology and explain why you like it."`; 
+        }
+        function getWritingFeedbackPrompt(level, topic, userText) { 
+            return `You are an expert English writing evaluator. A student at the ${level} CEFR level has written the following text about the topic "${topic}". IMPORTANT: The 'correctedTextHTML' field in your response MUST be a direct correction of the student's provided text below, using "<del>" and "<ins>" tags. Do not invent a new text. Student's text: """ ${userText} """ Please provide feedback in Vietnamese. You MUST wrap your entire response in a 'json' markdown code block. The JSON object must have the following structure: 1. "overallFeedback": A general comment in Vietnamese (2-3 sentences) on the text's content, clarity, and effort. 2. "score": An integer score from 0 to 100. 3. "correctedTextHTML": The student's original text with corrections applied. 4. "detailedFeedback": An array of objects, where each object explains a specific mistake. Each object should have: "type", "mistake", "correction", "explanation". Example of the required JSON output: \`\`\`json\n{ "overallFeedback": "...", "score": 75, "correctedTextHTML": "...", "detailedFeedback": [ { "type": "Grammar", "mistake": "...", "correction": "...", "explanation": "..." } ] }\n\`\`\``; 
+        }
+        function getConversationStartPrompt(topic) { 
+            return `You are a friendly, encouraging English conversation partner. Start a conversation with the user about the topic: "${topic}". Ask a simple, open-ended question to begin. Keep your opening short and natural.`; 
+        }
+        function getConversationFollowUpPrompt(history, topic) { 
+            return `You are a friendly, encouraging English conversation partner. The topic of conversation is "${topic}". Here is the conversation history so far:\n${history}\n\nBased on the user's last message, ask a natural, engaging follow-up question to keep the conversation going. Do not repeat questions. Keep your responses concise and friendly.`; 
+        }
+        function getConversationFeedbackPrompt(history, topic, level) { 
+            return `You are an expert English teacher. A student at the ${level} CEFR level has just completed a practice conversation with you about "${topic}". Your goal is to provide constructive, encouraging feedback. Here is the full transcript:\n${history}\n\nPlease provide your feedback in Vietnamese. You MUST wrap your entire response in a 'json' markdown code block. The JSON object must have the following structure: 1. "overallFeedback": A friendly, encouraging summary (2-3 sentences) of their performance, highlighting what they did well. 2. "strengths": An array of 1-2 strings, listing positive points (e.g., "Sử dụng tốt từ vựng về du lịch", "Phát âm rõ ràng các âm cuối"). 3. "areasForImprovement": An array of objects, each highlighting a specific area for improvement. Each object should have: "type" (e.g., "Ngữ pháp", "Lựa chọn từ", "Lưu loát"), "original" (the user's original phrase), "suggestion" (a better way to phrase it), and "explanation" (a short, clear explanation in Vietnamese). Focus on the most important points, don't overwhelm the user. Example of the required JSON output: \`\`\`json { "overallFeedback": "...", "strengths": ["..."], "areasForImprovement": [ { "type": "Ngữ pháp", "original": "I go to the cinema yesterday.", "suggestion": "I went to the cinema yesterday.", "explanation": "Khi nói về quá khứ, chúng ta dùng thì quá khứ đơn 'went' thay vì 'go'." } ] } \`\`\``; 
         }
 
-        // RE-ADDED: Prompts for Reinforcement and Expansion
         function getReinforcementPrompt(questionArgs, userAnswer) {
             const questionText = questionArgs.question || questionArgs.statement || questionArgs.title;
             const correctAnswer = questionArgs.correctAnswer || (questionArgs.options ? questionArgs.options[questionArgs.correctAnswerIndex] : 'N/A');
@@ -697,8 +742,7 @@
             english_reading: `<h2 class="text-xl font-semibold text-gray-700 border-b pb-3 flex items-center"><i data-lucide="book-open" class="w-5 h-5 mr-2 text-indigo-500"></i>2. Tùy chỉnh bài đọc</h2><div><label for="topicInput" class="block text-sm font-medium text-gray-700 mb-2">Chủ đề bài đọc</label><input type="text" id="topicInput" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition" placeholder="Ví dụ: The future of renewable energy"></div><fieldset class="mt-4"><legend class="text-sm font-medium text-gray-500 mb-3">Cấu hình bài đọc hiểu:</legend><div class="grid grid-cols-1 md:grid-cols-3 gap-4"><div class="md:col-span-1"><label for="passageLength" class="block text-xs font-medium text-gray-600 mb-1">Độ dài</label><select id="passageLength" class="w-full p-2 border border-gray-300 rounded-lg"><option value="short">Ngắn (~150 từ)</option><option value="medium" selected>Vừa (~250 từ)</option><option value="long">Dài (~400 từ)</option></select></div><div class="md:col-span-1"><label for="readingMcqCount" class="block text-xs font-medium text-gray-600 mb-1">Câu trắc nghiệm</label><input type="number" id="readingMcqCount" value="2" min="0" class="w-full p-2 border border-gray-300 rounded-lg text-center"></div><div class="md:col-span-1"><label for="readingSaqCount" class="block text-xs font-medium text-gray-600 mb-1">Câu tự luận</label><input type="number" id="readingSaqCount" value="1" min="0" class="w-full p-2 border border-gray-300 rounded-lg text-center"></div></div></fieldset>`,
             english_grammar: `<h2 class="text-xl font-semibold text-gray-700 border-b pb-3 flex items-center"><i data-lucide="spell-check-2" class="w-5 h-5 mr-2 text-indigo-500"></i>2. Tùy chỉnh ngữ pháp</h2><div><label for="topicInput" class="block text-sm font-medium text-gray-700 mb-2">Chủ điểm ngữ pháp</label><input type="text" id="topicInput" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition" placeholder="Ví dụ: Present Perfect Tense, Passive Voice..."></div>${commonExerciseTypesTemplate}`,
             english_vocabulary: `<h2 class="text-xl font-semibold text-gray-700 border-b pb-3 flex items-center"><i data-lucide="book-a" class="w-5 h-5 mr-2 text-indigo-500"></i>2. Tùy chỉnh từ vựng</h2><div><label for="topicInput" class="block text-sm font-medium text-gray-700 mb-2">Chủ đề từ vựng</label><input type="text" id="topicInput" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition" placeholder="Ví dụ: Travel, Technology, Environment..."></div>${commonExerciseTypesTemplate}`,
-            // NEW TEMPLATES for new skills
-            english_listening: `<h2 class="text-xl font-semibold text-gray-700 border-b pb-3 flex items-center"><i data-lucide="headphones" class="w-5 h-5 mr-2 text-indigo-500"></i>2. Tùy chỉnh bài nghe</h2><div><label for="topicInput" class="block text-sm font-medium text-gray-700 mb-2">Chủ đề bài nghe</label><input type="text" id="topicInput" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition" placeholder="Ví dụ: A conversation at a restaurant"></div><fieldset class="mt-4"><legend class="text-sm font-medium text-gray-500 mb-3">Số câu hỏi:</legend><input type="number" id="questionCount" value="3" min="1" max="5" class="w-full p-2 border border-gray-300 rounded-lg text-center"></fieldset>`,
+            english_listening: `<h2 class="text-xl font-semibold text-gray-700 border-b pb-3 flex items-center"><i data-lucide="headphones" class="w-5 h-5 mr-2 text-indigo-500"></i>2. Tùy chỉnh bài nghe</h2><div><label for="topicInput" class="block text-sm font-medium text-gray-700 mb-2">Chủ đề bài nghe</label><input type="text" id="topicInput" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition" placeholder="Ví dụ: A conversation at a restaurant"></div><div class="grid grid-cols-2 gap-4 mt-4"><fieldset><legend class="text-sm font-medium text-gray-500 mb-2">Độ dài</legend><select id="scriptLength" class="w-full p-2 border border-gray-300 rounded-lg"><option value="short">Ngắn</option><option value="medium" selected>Vừa</option><option value="long">Dài</option></select></fieldset><fieldset><legend class="text-sm font-medium text-gray-500 mb-2">Số câu hỏi</legend><input type="number" id="questionCount" value="3" min="1" max="5" class="w-full p-2 border border-gray-300 rounded-lg text-center"></fieldset></div>`,
             english_writing: `<h2 class="text-xl font-semibold text-gray-700 border-b pb-3 flex items-center"><i data-lucide="file-pen-line" class="w-5 h-5 mr-2 text-indigo-500"></i>2. Tùy chỉnh bài viết</h2><div><label for="topicInput" class="block text-sm font-medium text-gray-700 mb-2">Chủ đề bài viết</label><input type="text" id="topicInput" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition" placeholder="Ví dụ: The advantages of remote work"></div>`,
             english_conversation: `<h2 class="text-xl font-semibold text-gray-700 border-b pb-3 flex items-center"><i data-lucide="messages-square" class="w-5 h-5 mr-2 text-indigo-500"></i>2. Tùy chỉnh hội thoại</h2><div><label for="topicInput" class="block text-sm font-medium text-gray-700 mb-2">Chủ đề hội thoại</label><input type="text" id="topicInput" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition" placeholder="Ví dụ: Your last vacation"></div>`,
             mathematics: `<h2 class="text-xl font-semibold text-gray-700 border-b pb-3 flex items-center"><i data-lucide="calculator" class="w-5 h-5 mr-2 text-indigo-500"></i>2. Tùy chỉnh nội dung</h2><div><label for="topicInput" class="block text-sm font-medium text-gray-700 mb-2">Chủ đề toán học</label><textarea id="topicInput" rows="4" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition" placeholder="Ví dụ: Phương trình bậc hai, Tích phân, Hình học không gian..."></textarea></div>${commonExerciseTypesTemplate}`
@@ -735,9 +779,11 @@
             if (practiceActionsContainer) practiceActionsContainer.classList.add('hidden');
             if (checkAllAnswersButton) checkAllAnswersButton.style.display = 'block';
             summarySaveStatus.textContent = '';
+            conversationHistory = [];
+            conversationLog.innerHTML = '';
         }
 
-        // NEW: Main controller function
+        // Main controller function
         async function startPractice() {
             const subject = subjectSelect.value;
             if (subject === 'english') {
@@ -747,12 +793,10 @@
                         await startListeningPractice();
                         break;
                     case 'writing':
-                        // Placeholder for now
-                        alert("Tính năng Luyện Viết sắp ra mắt!");
+                        await startWritingPractice();
                         break;
                     case 'conversation':
-                        // Placeholder for now
-                        alert("Tính năng Hội thoại sắp ra mắt!");
+                        await startConversationPractice();
                         break;
                     default:
                         // Existing logic for vocab, grammar, reading
@@ -764,6 +808,7 @@
             }
         }
 
+        // --- LISTENING FEATURE ---
         async function startListeningPractice() {
             if (!model) { updateStatus('error', "Mô hình AI chưa được khởi tạo."); return; }
             setLoadingState(true);
@@ -772,6 +817,7 @@
             const topic = document.getElementById('topicInput').value.trim();
             const level = levelSelect.value;
             const count = document.getElementById('questionCount').value;
+            const length = document.getElementById('scriptLength').value;
 
             if (!topic) {
                 updateStatus('error', "Vui lòng nhập chủ đề cho bài nghe.");
@@ -779,10 +825,10 @@
                 return;
             }
 
-            currentQuizData = { type: 'listening', topic, level, count };
+            currentQuizData = { type: 'listening', topic, level, count, length };
             
             try {
-                const prompt = getListeningPrompt(level, topic, count);
+                const prompt = getListeningPrompt(level, topic, count, length);
                 const result = await model.generateContent(prompt);
                 const response = await result.response;
                 const parsedData = extractAndParseJson(response.text());
@@ -809,24 +855,254 @@
         }
 
         function renderListeningQuiz() {
-            // Show audio player
             audioPlayerContainer.classList.remove('hidden');
             transcriptContainer.classList.add('hidden');
             transcriptContainer.textContent = currentQuizData.raw.script;
             showTranscriptBtn.textContent = 'Hiện lời thoại';
-            audioStatus.textContent = 'Nhấn để nghe';
-            // NOTE: Actual audio playback logic will be added later.
+            setupAudioPlayer();
 
-            // Render questions in the desired mode (practice or interactive)
             if (modeSelect.value === 'practice') {
                 practiceModeContainer.classList.remove('hidden');
                 interactiveModeContainer.classList.add('hidden');
-                renderPracticeMode(allQuestions); // Pass questions to render
+                renderPracticeMode(allQuestions);
             } else {
                 practiceModeContainer.classList.add('hidden');
                 interactiveModeContainer.classList.remove('hidden');
-                renderInteractiveMode(allQuestions); // Pass questions to render
+                renderInteractiveMode(allQuestions);
             }
+        }
+
+        // --- WRITING FEATURE ---
+        async function startWritingPractice() {
+            if (!model) { updateStatus('error', "Mô hình AI chưa được khởi tạo."); return; }
+            setLoadingState(true);
+            resetQuizState();
+
+            const topic = document.getElementById('topicInput').value.trim();
+            const level = levelSelect.value;
+            if (!topic) {
+                updateStatus('error', "Vui lòng nhập chủ đề bài viết.");
+                setLoadingState(false);
+                return;
+            }
+            currentQuizData = { type: 'writing', topic, level };
+
+            try {
+                const prompt = getWritingTopicPrompt(level, topic);
+                const result = await model.generateContent(prompt);
+                const response = await result.response;
+                const topicText = response.text();
+
+                writingTopic.textContent = topicText;
+                writingInput.value = '';
+                wordCount.textContent = '0 từ';
+                writingFeedbackContainer.innerHTML = '';
+                getFeedbackBtn.disabled = false;
+                writingInput.disabled = false;
+                writingActionsContainer.classList.add('hidden');
+                
+                switchView('writing');
+            } catch (error) {
+                showError(`Không thể tạo chủ đề luyện viết. Lỗi: ${error.message}.`);
+            } finally {
+                setLoadingState(false);
+            }
+        }
+
+        async function getWritingFeedback() {
+            const userText = writingInput.value;
+            if (userText.trim().split(/\s+/).length < 10) {
+                alert("Vui lòng viết ít nhất 10 từ để nhận được phản hồi chất lượng.");
+                return;
+            }
+
+            const button = getFeedbackBtn;
+            const btnTextEl = button.querySelector('.btn-text');
+            const spinnerEl = button.querySelector('.spinner');
+            
+            btnTextEl.textContent = 'AI đang phân tích...';
+            spinnerEl.classList.remove('hidden'); 
+            button.disabled = true; 
+            writingInput.disabled = true;
+
+            try {
+                const { level, topic } = currentQuizData;
+                const prompt = getWritingFeedbackPrompt(level, topic, userText);
+                const result = await model.generateContent(prompt);
+                const response = await result.response;
+                const feedbackData = extractAndParseJson(response.text());
+
+                if (!feedbackData) {
+                    throw new Error("AI không trả về phản hồi hợp lệ. Vui lòng thử lại.");
+                }
+
+                displayWritingFeedback(feedbackData);
+                writingActionsContainer.classList.remove('hidden');
+
+            } catch (error) {
+                writingFeedbackContainer.innerHTML = `<p class="text-red-500">Lỗi: ${error.message}</p>`;
+            } finally {
+                btnTextEl.textContent = 'Nhận phản hồi từ AI';
+                spinnerEl.classList.add('hidden'); 
+            }
+        }
+
+        function displayWritingFeedback(data) {
+            writingFeedbackContainer.innerHTML = `
+                <div class="bg-sky-100 border-2 border-sky-300 rounded-xl p-6 text-center" style="font-family: 'Be Vietnam Pro', sans-serif;">
+                    <p class="text-2xl font-semibold mb-2">Điểm của bạn</p>
+                    <p class="text-6xl font-bold text-sky-600">${data.score} / 100</p>
+                </div>
+                <div class="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                    <h4 class="text-lg font-bold text-slate-800 mb-2">Nhận xét chung</h4>
+                    <p class="text-slate-700">${data.overallFeedback}</p>
+                </div>
+                <div class="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                    <h4 class="text-lg font-bold text-slate-800 mb-2">Bài viết đã sửa</h4>
+                    <p class="text-lg leading-relaxed">${data.correctedTextHTML}</p>
+                </div>
+                <div class="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                    <h4 class="text-lg font-bold text-slate-800 mb-3">Phân tích chi tiết</h4>
+                    <div class="space-y-3">
+                        ${(data.detailedFeedback || []).map(item => `
+                            <div class="p-3 rounded-md bg-white border">
+                                <p class="font-semibold text-slate-700"><span class="text-sm font-bold py-0.5 px-2 rounded-full bg-amber-200 text-amber-800">${item.type}</span></p>
+                                <p class="text-red-600 mt-2">Lỗi: <del>${item.mistake}</del></p>
+                                <p class="text-green-600">Sửa thành: <ins>${item.correction}</ins></p>
+                                <p class="text-slate-600 mt-2 text-sm"><i>${item.explanation}</i></p>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- CONVERSATION FEATURE ---
+        async function startConversationPractice() {
+            if (!model) { updateStatus('error', "Mô hình AI chưa được khởi tạo."); return; }
+            setLoadingState(true);
+            resetQuizState();
+
+            const topic = document.getElementById('topicInput').value.trim();
+            const level = levelSelect.value;
+            if (!topic) {
+                updateStatus('error', "Vui lòng nhập chủ đề hội thoại.");
+                setLoadingState(false);
+                return;
+            }
+            currentQuizData = { type: 'conversation', topic, level };
+            conversationTopic.textContent = `Chủ đề: ${topic}`;
+
+            try {
+                const prompt = getConversationStartPrompt(topic);
+                const result = await model.generateContent(prompt);
+                const response = await result.response;
+                const aiResponse = response.text();
+                
+                addMessageToLog('ai', aiResponse);
+                conversationHistory.push({ role: 'model', parts: [{ text: aiResponse }] });
+                
+                switchView('conversation');
+            } catch (error) {
+                showError(`Không thể bắt đầu hội thoại. Lỗi: ${error.message}`);
+            } finally {
+                setLoadingState(false);
+            }
+        }
+
+        async function handleConversationResponse() {
+            const userText = conversationTextInput.value.trim();
+            if (!userText) return;
+
+            addMessageToLog('user', userText);
+            conversationHistory.push({ role: 'user', parts: [{ text: userText }] });
+            conversationTextInput.value = '';
+            conversationTextInput.disabled = true;
+            sendTextBtn.disabled = true;
+
+            try {
+                const historyText = conversationHistory.map(h => `${h.role}: ${h.parts[0].text}`).join('\n');
+                const prompt = getConversationFollowUpPrompt(historyText, currentQuizData.topic);
+                const result = await model.generateContent(prompt);
+                const response = await result.response;
+                const aiResponse = response.text();
+
+                addMessageToLog('ai', aiResponse);
+                conversationHistory.push({ role: 'model', parts: [{ text: aiResponse }] });
+
+            } catch (error) {
+                addMessageToLog('ai', 'Rất tiếc, đã có lỗi xảy ra. Vui lòng thử lại.');
+            } finally {
+                conversationTextInput.disabled = false;
+                sendTextBtn.disabled = false;
+                conversationTextInput.focus();
+            }
+        }
+
+        async function endConversationAndGetFeedback() {
+            endConversationBtn.disabled = true;
+            
+            // IMPROVEMENT: Show modal immediately with loading state
+            lessonModal.classList.add('active');
+            lessonTitle.textContent = "Đang phân tích hội thoại...";
+            lessonContent.innerHTML = '<div class="spinner mx-auto"></div>';
+
+            try {
+                const historyText = conversationHistory.map(h => `${h.role === 'model' ? 'AI' : 'User'}: ${h.parts[0].text}`).join('\n');
+                const prompt = getConversationFeedbackPrompt(historyText, currentQuizData.topic, currentQuizData.level);
+                
+                const result = await model.generateContent(prompt);
+                const response = await result.response;
+                const feedbackData = extractAndParseJson(response.text());
+
+                if (!feedbackData) { throw new Error("AI không trả về nhận xét hợp lệ."); }
+                
+                displayConversationFeedback(feedbackData);
+
+            } catch(error) {
+                lessonContent.innerHTML = `<p class="text-red-500">Lỗi khi nhận phản hồi: ${error.message}</p>`;
+            } finally {
+                endConversationBtn.disabled = false;
+            }
+        }
+
+        function addMessageToLog(sender, text) {
+            const messageEl = document.createElement('div');
+            messageEl.className = `bubble bubble-${sender}`;
+            messageEl.textContent = text;
+            conversationLog.appendChild(messageEl);
+            conversationLog.scrollTop = conversationLog.scrollHeight;
+        }
+
+        function displayConversationFeedback(data) {
+            lessonTitle.textContent = "Nhận xét buổi hội thoại";
+            lessonTitle.className = "text-2xl font-bold text-indigo-600";
+            
+            lessonContent.innerHTML = `
+                <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                    <h4 class="text-md font-bold text-slate-800 mb-2">Nhận xét chung</h4>
+                    <p class="text-slate-700">${data.overallFeedback}</p>
+                </div>
+                <div class="bg-green-50 p-3 rounded-lg border border-green-200">
+                    <h4 class="text-md font-bold text-green-800 mb-2">Điểm mạnh 👍</h4>
+                    <ul class="list-disc list-inside text-green-700">
+                        ${(data.strengths || []).map(item => `<li>${item}</li>`).join('')}
+                    </ul>
+                </div>
+                <div class="bg-amber-50 p-3 rounded-lg border border-amber-200">
+                    <h4 class="text-md font-bold text-amber-800 mb-3">Gợi ý cải thiện 💡</h4>
+                    <div class="space-y-3">
+                        ${(data.areasForImprovement || []).map(item => `
+                            <div class="p-3 rounded-md bg-white border">
+                                <p class="font-semibold text-slate-700"><span class="text-sm font-bold py-0.5 px-2 rounded-full bg-amber-200 text-amber-800">${item.type}</span></p>
+                                <p class="text-red-600 mt-2">Bạn đã nói: <del>${item.original}</del></p>
+                                <p class="text-green-600">Gợi ý: <ins>${item.suggestion}</ins></p>
+                                <p class="text-slate-600 mt-2 text-sm"><i>${item.explanation}</i></p>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
         }
 
 
@@ -1163,9 +1439,7 @@
             let questionCounter = 0;
             questionsToRender.forEach((item, index) => {
                 const isListeningQuestion = currentQuizData.type === 'listening';
-                // FIX: In listening mode, item IS the question. In other modes, it's item.args
                 const args = isListeningQuestion ? item : item.args;
-                // FIX: In listening, type is always mcq. In others, it's item.name
                 const name = isListeningQuestion ? 'createMultipleChoiceQuestion' : item.name;
                 const renderFunction = renderers[name];
                 
@@ -1182,7 +1456,7 @@
             practiceActionsContainer.classList.add('hidden');
             checkAllAnswersButton.style.display = 'block';
             lucide.createIcons();
-            renderMath(exerciseListContainer); // FIX: Render math after content is added
+            renderMath(exerciseListContainer);
         }
 
         function renderInteractiveMode(questionsToRender) {
@@ -1232,7 +1506,7 @@
 
             updateProgress();
             lucide.createIcons();
-            renderMath(interactiveQuestionHost); // FIX: Render math after content is added
+            renderMath(interactiveQuestionHost);
         }
 
         function checkInteractiveAnswer(questionIndex) {
@@ -1259,7 +1533,7 @@
             interactiveFooter.innerHTML = ''; interactiveFooter.appendChild(continueButton);
             continueButton.addEventListener('click', showNextQuestion);
             lucide.createIcons();
-            renderMath(interactiveQuestionHost); // FIX: Render math after feedback
+            renderMath(interactiveQuestionHost);
         }
 
         function showNextQuestion() {
@@ -1566,6 +1840,64 @@
             lucide.createIcons();
         }
 
+        // --- AUDIO PLAYBACK LOGIC ---
+        function playSpeech(text) {
+            if (synth.speaking) {
+                synth.cancel();
+            }
+            audioState.isPaused = false;
+            
+            const utterance = new SpeechSynthesisUtterance(text);
+            const voices = synth.getVoices();
+            let selectedVoice = voices.find(voice => voice.name === 'Google US English' || voice.name === 'Microsoft David - English (United States)');
+            if (!selectedVoice) {
+                selectedVoice = voices.find(voice => voice.lang.startsWith('en-')) || voices[0];
+            }
+            utterance.voice = selectedVoice;
+            utterance.rate = 0.9;
+            
+            utterance.onstart = () => {
+                playAudioBtn.innerHTML = `<i data-lucide="pause" class="w-6 h-6"></i>`;
+                lucide.createIcons();
+                audioStatus.textContent = "Đang phát...";
+            };
+            
+            utterance.onend = () => {
+                if (!audioState.isPaused) {
+                    playAudioBtn.innerHTML = `<i data-lucide="play" class="w-6 h-6"></i>`;
+                    lucide.createIcons();
+                    audioStatus.textContent = "Nghe lại";
+                }
+            };
+            
+            audioState.utterance = utterance;
+            synth.speak(utterance);
+        }
+
+        function setupAudioPlayer() {
+            playAudioBtn.innerHTML = `<i data-lucide="play" class="w-6 h-6"></i>`;
+            lucide.createIcons();
+            audioStatus.textContent = "Nhấn để nghe";
+            
+            playAudioBtn.onclick = () => {
+                if (synth.speaking && !synth.paused) {
+                    synth.pause();
+                    audioState.isPaused = true;
+                    playAudioBtn.innerHTML = `<i data-lucide="play" class="w-6 h-6"></i>`;
+                    lucide.createIcons();
+                    audioStatus.textContent = "Đã tạm dừng";
+                } else if (synth.paused) {
+                    synth.resume();
+                    audioState.isPaused = false;
+                    playAudioBtn.innerHTML = `<i data-lucide="pause" class="w-6 h-6"></i>`;
+                    lucide.createIcons();
+                    audioStatus.textContent = "Đang phát...";
+                } else {
+                    playSpeech(currentQuizData.raw.script);
+                }
+            };
+        }
+
         // RE-ADDED: Functions for Expanded Knowledge & Reinforcement
         async function requestExpandedKnowledge(questionArgs) {
             lessonModal.classList.add('active');
@@ -1685,14 +2017,23 @@
         modePracticeBtn.addEventListener('click', () => { modeSelect.value = 'practice'; modePracticeBtn.classList.add('bg-white', 'text-indigo-600', 'shadow'); modePracticeBtn.classList.remove('text-gray-500'); modeInteractiveBtn.classList.remove('bg-white', 'text-indigo-600', 'shadow'); modeInteractiveBtn.classList.add('text-gray-500'); });
         modeInteractiveBtn.addEventListener('click', () => { modeSelect.value = 'interactive'; modeInteractiveBtn.classList.add('bg-white', 'text-indigo-600', 'shadow'); modeInteractiveBtn.classList.remove('text-gray-500'); modePracticeBtn.classList.remove('bg-white', 'text-indigo-600', 'shadow'); modePracticeBtn.classList.add('text-gray-500'); });
         subjectSelect.addEventListener('change', updateDynamicControls);
-        skillSelect.addEventListener('change', updateDynamicControls); // Add listener for skill changes
+        skillSelect.addEventListener('change', updateDynamicControls); 
         
-        generateButton.addEventListener('click', startPractice); // Main button now calls the controller
+        generateButton.addEventListener('click', startPractice); 
         checkAllAnswersButton.addEventListener('click', checkAllPracticeAnswers);
+        getFeedbackBtn.addEventListener('click', getWritingFeedback);
+        writingInput.addEventListener('input', () => {
+            const text = writingInput.value;
+            const count = text.trim() === '' ? 0 : text.trim().split(/\s+/).length;
+            wordCount.textContent = `${count} từ`;
+        });
+        showTranscriptBtn.addEventListener('click', () => {
+            transcriptContainer.classList.toggle('hidden');
+            showTranscriptBtn.textContent = transcriptContainer.classList.contains('hidden') ? 'Hiện lời thoại' : 'Ẩn lời thoại';
+        });
         
         const handleRestart = () => {
              resetQuizState();
-             // Logic to restart the current activity type will be added here
              alert("Restart logic will be implemented!");
         };
         const handleChangeSettings = () => switchView('controls');
@@ -1700,7 +2041,18 @@
         changeSettingsBtn.addEventListener('click', handleChangeSettings);
         restartPracticeBtn.addEventListener('click', handleRestart);
         changeSettingsFromPracticeBtn.addEventListener('click', handleChangeSettings);
+        restartWritingBtn.addEventListener('click', startWritingPractice);
+        changeSettingsFromWritingBtn.addEventListener('click', handleChangeSettings);
         
+        sendTextBtn.addEventListener('click', handleConversationResponse);
+        conversationTextInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                handleConversationResponse();
+            }
+        });
+        endConversationBtn.addEventListener('click', endConversationAndGetFeedback);
+
         historyBtn.addEventListener('click', renderHistory);
         backToMainBtn.addEventListener('click', () => switchView('controls'));
 
