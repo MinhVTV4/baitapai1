@@ -847,23 +847,12 @@
         let audioState = { utterance: null, isPaused: false };
         let completedTopics = []; // For learning mode
 
-        // --- UPDATED: System Prompt for Learning Mode ---
+        // --- System Prompt for Learning Mode ---
         const LEARNING_MODE_SYSTEM_PROMPT = `**CHỈ THỊ HỆ THỐNG - CHẾ ĐỘ HỌC TẬP ĐANG BẬT**
         Bạn là một người hướng dẫn học tập chuyên nghiệp, có khả năng chia nhỏ các chủ đề phức tạp thành một lộ trình học tập rõ ràng.
         1.  **Tạo Lộ trình:** Khi người dùng yêu cầu một chủ đề, hãy trả lời bằng một danh sách các bài học có cấu trúc (dùng Markdown với gạch đầu dòng).
         2.  **Tạo Liên kết Tương tác:** Đối với MỖI BÀI HỌC trong lộ trình, bạn PHẢI định dạng nó theo cú pháp đặc biệt sau: \`[Tên bài học]{"prompt":"Yêu cầu chi tiết để bạn giảng giải về bài học này"}\`. Prompt phải chi tiết và bằng tiếng Việt.
-        3.  **Tạo Quiz Củng cố:** Sau khi giảng xong một bài học (khi người dùng nhấp vào một liên kết), hãy tạo ra 1-2 câu hỏi củng cố kiến thức. Các câu hỏi này PHẢI được bọc trong khối mã \`\`\`quiz ... \`\`\` và tuân theo định dạng JSON đã được cung cấp.
-        4.  **Công thức Toán học:** Luôn sử dụng cú pháp LaTeX (ví dụ: $x^2 + y^2 = z^2$) cho mọi công thức toán.
-
-        **Định dạng Quiz (BẮT BUỘC BỌC TRONG KHỐI MÃ \`\`\`quiz... \`\`\`):**
-        * **Trắc nghiệm:** \`\`\`quiz\n{"type": "multiple_choice", "question": "Câu hỏi?", "options": {"A": "Lựa chọn A", "B": "Lựa chọn B"}, "answer": "A", "explanation": "Giải thích."}\n\`\`\`
-        * **Điền từ:** \`\`\`quiz\n{"type": "fill_in_the_blank", "sentence": "Thủ đô của Việt Nam là {{BLANK}}.", "blanks": ["Hà Nội"], "explanation": "Giải thích."}\n\`\`\`
-        * **Thẻ từ vựng (Flashcard):** \`\`\`quiz\n{ "type": "flashcard", "title": "Tiêu đề của bộ Flashcard", "cards": [ { "front": "Từ/Khái niệm", "back": "Giải thích/Nghĩa" } ], "explanation": "Giải thích chung." }\n\`\`\`
-        * **Tự luận ngắn:** \`\`\`quiz\n{"type": "short_answer", "question": "Câu hỏi?", "keywords": ["từ khóa", "quan trọng"], "expected_answer_gist": "Ý chính của đáp án.", "explanation": "Giải thích đầy đủ."}\n\`\`\`
-        * **Kéo và Thả (Ghép nối):** \`\`\`quiz\n{"type": "drag_and_drop_matching", "title": "Ghép nối", "items": [{"id": "item1", "text": "A"}], "targets": [{"id": "target1", "text": "B", "matchId": "item1"}], "explanation": "Giải thích."}\n\`\`\`
-        * **Sắp xếp câu:** \`\`\`quiz\n{"type": "sentence_ordering", "title": "Sắp xếp", "sentences": [{"id": "s1", "text": "Câu 1"}], "correctOrder": ["s1"], "explanation": "Giải thích."}\n\`\`\`
         `;
-
 
         // --- Utility Functions ---
         function sanitizeString(str) {
@@ -878,18 +867,6 @@
             jsonString = jsonString.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
             try { return JSON.parse(jsonString); } 
             catch (error) { console.error("JSON Parse Error:", error, "String:", jsonString); return null; }
-        }
-        
-        function extractAndReplaceQuizBlocks(rawText) {
-            const quizRegex = /```quiz\s*([\s\S]*?)\s*```/g;
-            const quizzes = [];
-            let quizCounter = 0;
-            const processedText = rawText.replace(quizRegex, (match, jsonContent) => {
-                const placeholderId = `quiz-placeholder-${quizCounter++}`;
-                quizzes.push({ id: placeholderId, json: jsonContent.trim() });
-                return `<div id="${placeholderId}"></div>`;
-            });
-            return { processedText, quizzes };
         }
 
         // --- AI TOOLBOX ---
@@ -1010,6 +987,78 @@
 
         function showError(message) {
             alert(message); // Using a temporary alert for the purpose of this demo
+        }
+
+        // --- NEW: Functions for reinforcement and expansion ---
+        async function requestReinforcement(questionArgs, userAnswer) {
+            // Placeholder function to simulate the request
+            lessonModal.classList.add('active');
+            lessonTitle.textContent = "Củng cố kiến thức";
+            lessonContent.innerHTML = '<div class="spinner mx-auto"></div>';
+            
+            const prompt = getReinforcementPrompt(questionArgs, userAnswer);
+            try {
+                const result = await model.generateContent(prompt);
+                const response = await result.response;
+                const lessonData = extractAndParseJson(response.text());
+
+                if (lessonData) {
+                    lessonContent.innerHTML = `
+                        <h4 class="font-bold text-lg mb-2 text-purple-600 dark:text-purple-400">${lessonData.conceptTitle}</h4>
+                        <div class="prose dark:prose-invert">
+                            <p>${lessonData.mistakeAnalysis}</p>
+                            <p>${lessonData.conceptExplanation}</p>
+                            <h5 class="font-semibold mt-4 mb-2">Ví dụ:</h5>
+                            <ul class="list-disc list-inside">
+                                ${lessonData.examples.map(ex => `<li>${typeof ex === 'object' ? `${ex.en} - ${ex.vi}` : ex}</li>`).join('')}
+                            </ul>
+                            <h5 class="font-semibold mt-4 mb-2">Mẹo luyện tập:</h5>
+                            <p>${lessonData.practiceTip}</p>
+                        </div>
+                    `;
+                    renderMath(lessonContent);
+                } else {
+                    lessonContent.innerHTML = `<p class="text-red-500">Lỗi: Không thể nhận phản hồi củng cố kiến thức từ AI.</p>`;
+                }
+            } catch (error) {
+                console.error("Lỗi khi yêu cầu củng cố:", error);
+                lessonContent.innerHTML = `<p class="text-red-500">Lỗi: Không thể kết nối với AI để củng cố kiến thức.</p>`;
+            }
+        }
+
+        async function requestExpandedKnowledge(questionArgs) {
+             // Placeholder function to simulate the request
+            lessonModal.classList.add('active');
+            lessonTitle.textContent = "Mở rộng kiến thức";
+            lessonContent.innerHTML = '<div class="spinner mx-auto"></div>';
+            
+            const prompt = getExpansionPrompt(questionArgs);
+            try {
+                const result = await model.generateContent(prompt);
+                const response = await result.response;
+                const lessonData = extractAndParseJson(response.text());
+                
+                if (lessonData) {
+                     lessonContent.innerHTML = `
+                        <h4 class="font-bold text-lg mb-2 text-teal-600 dark:text-teal-400">${lessonData.conceptTitle}</h4>
+                        <div class="prose dark:prose-invert">
+                             <p>${lessonData.conceptExplanation}</p>
+                            <h5 class="font-semibold mt-4 mb-2">Ví dụ:</h5>
+                            <ul class="list-disc list-inside">
+                                ${lessonData.examples.map(ex => `<li>${typeof ex === 'object' ? `${ex.en} - ${ex.vi}` : ex}</li>`).join('')}
+                            </ul>
+                            <h5 class="font-semibold mt-4 mb-2">Mẹo luyện tập:</h5>
+                            <p>${lessonData.practiceTip}</p>
+                        </div>
+                    `;
+                    renderMath(lessonContent);
+                } else {
+                    lessonContent.innerHTML = `<p class="text-red-500">Lỗi: Không thể nhận phản hồi mở rộng kiến thức từ AI.</p>`;
+                }
+            } catch (error) {
+                 console.error("Lỗi khi yêu cầu mở rộng:", error);
+                 lessonContent.innerHTML = `<p class="text-red-500">Lỗi: Không thể kết nối với AI để mở rộng kiến thức.</p>`;
+            }
         }
         
         // Main controller function
